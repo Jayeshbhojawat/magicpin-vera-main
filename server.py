@@ -1,334 +1,298 @@
 """
-server.py — Vera HTTP Server
-magicpin AI Challenge — jayesh bhojawat
+server.py — Vera HTTP Server v2
+magicpin AI Challenge — Jayesh Bhojawat
 
-Exposes the 5 endpoints required by the judge harness:
-  POST /v1/context   — receive context push
-  POST /v1/tick      — periodic wake-up, bot decides what to send
-  POST /v1/reply     — receive merchant/customer reply, respond
-  GET  /v1/healthz   — liveness probe
-  GET  /v1/metadata  — bot identity
-
-Run: python server.py
-     (default port 8080)
+Fixed:
+  - /v1/reply: customer slot pick → warm confirmation (not action=end)
+  - /v1/reply: never returns empty body
+  - Auto-reply: end after FIRST failed attempt (not second)
+  - All fallback responses use compulsion levers
+  - from_role branching: merchant vs customer handled separately
 """
 
-import json
-import uuid
-import time
+import json, uuid, time, re
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify
-from bot import compose, load_dataset, MODEL
+from bot import compose, load_dataset, _hi, _name, _active_offers
 
 app = Flask(__name__)
 
-# ── In-memory state store ─────────────────────────────────────────────────────
-# contexts: {scope: {context_id: {version, payload}}}
-store = {
-    "category": {},
-    "merchant": {},
-    "customer": {},
-    "trigger": {},
-}
-
-# Active conversations: {conversation_id: {merchant_id, customer_id, trigger_id, turns: []}}
-conversations = {}
-
-# Suppression log: set of suppression_keys already sent
-sent_suppression_keys = set()
-
-# Load seed dataset on startup
+# ── In-memory state ───────────────────────────────────────────────────────────
+store = {"category": {}, "merchant": {}, "customer": {}, "trigger": {}}
+conversations = {}  # conv_id → {merchant_id, customer_id, trigger_id, turns, state}
+sent_keys = set()   # suppression keys already fired
+_start = time.time()
 _dataset = None
 
-def get_dataset():
+def ds():
     global _dataset
     if _dataset is None:
-        import os
-        DATASET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dataset")
-        print("Dataset dir:", DATASET_DIR)
-        print("Files:", os.listdir(DATASET_DIR))
-        _dataset = load_dataset(DATASET_DIR)
+        _dataset = load_dataset("dataset")
     return _dataset
 
-def resolve_context(merchant_id: str, trigger_id: str, customer_id: str | None):
-    """Resolve all 4 contexts from store (or fall back to seed dataset)."""
-    ds = get_dataset()
-
-    # Category
-    merchant_payload = store["merchant"].get(merchant_id, {}).get("payload") or \
-                       ds["merchants"].get(merchant_id, {})
-    cat_slug = merchant_payload.get("category_slug", "")
-    category = store["category"].get(cat_slug, {}).get("payload") or \
-               ds["categories"].get(cat_slug, {})
-
-    # Merchant
-    merchant = merchant_payload
-
-    # Trigger
-    trigger = store["trigger"].get(trigger_id, {}).get("payload") or \
-              ds["triggers"].get(trigger_id, {})
-
-    # Customer
+def resolve(merchant_id, trigger_id, customer_id=None):
+    d = ds()
+    merchant = store["merchant"].get(merchant_id,{}).get("payload") or d["merchants"].get(merchant_id,{})
+    cat_slug = merchant.get("category_slug","")
+    category = store["category"].get(cat_slug,{}).get("payload") or d["categories"].get(cat_slug,{})
+    trigger  = store["trigger"].get(trigger_id,{}).get("payload") or d["triggers"].get(trigger_id,{})
     customer = None
     if customer_id:
-        customer = store["customer"].get(customer_id, {}).get("payload") or \
-                   ds["customers"].get(customer_id)
-
+        customer = store["customer"].get(customer_id,{}).get("payload") or d["customers"].get(customer_id)
     return category, merchant, trigger, customer
+
+
+# ── Intent helpers ────────────────────────────────────────────────────────────
+POSITIVE = ["yes","ok","sure","haan","bilkul","karo","go ahead","please do",
+            "let's do","start","shuru","proceed","send kar","draft kar","book kar"]
+EXIT     = ["no","nahi","stop","not interested","baad mein","later","cancel",
+            "unsubscribe","mat karo","band karo","not now"]
+SLOT_PICK = re.compile(r'\b(1|2|3|wed|thu|fri|sat|sun|mon|tue|6pm|5pm|7pm|8am|9am|book|confirm|slot)\b', re.I)
+AUTO_REPLY_RE = re.compile(
+    r'(aapki jaankari ke liye|thank you for contact|unavailable|will get back|automated (message|reply)|main ek automated|hum aapko jald)', re.I)
+
+def intent(msg):
+    m = msg.lower()
+    if EXIT and any(s in m for s in EXIT): return "exit"
+    if SLOT_PICK.search(m): return "slot_pick"
+    if any(s in m for s in POSITIVE): return "positive"
+    if "?" in m or any(w in m for w in ["kya","how","when","kab","kitna","kaun","what","which"]): return "question"
+    return "neutral"
+
+def is_auto_reply(msg, prior_msgs):
+    if AUTO_REPLY_RE.search(msg): return True
+    if prior_msgs.count(msg) >= 1 and len(msg) > 20: return True
+    return False
 
 
 # ── POST /v1/context ──────────────────────────────────────────────────────────
 @app.route("/v1/context", methods=["POST"])
-def receive_context():
+def ctx():
     data = request.get_json(force=True)
     scope = data.get("scope")
-    context_id = data.get("context_id")
-    version = data.get("version", 1)
-    payload = data.get("payload", {})
-
-    if scope not in ("category", "merchant", "customer", "trigger"):
-        return jsonify({"accepted": False, "reason": "invalid_scope", "details": f"unknown scope: {scope}"}), 400
-
-    existing = store[scope].get(context_id, {})
-    if existing.get("version", 0) > version:
-        return jsonify({"accepted": False, "reason": "stale_version",
-                        "current_version": existing["version"]}), 409
-
-    store[scope][context_id] = {"version": version, "payload": payload}
-    ack_id = f"ack_{uuid.uuid4().hex[:8]}"
-    return jsonify({
-        "accepted": True,
-        "ack_id": ack_id,
-        "stored_at": datetime.now(timezone.utc).isoformat(),
-    }), 200
+    cid   = data.get("context_id")
+    ver   = data.get("version",1)
+    if scope not in store:
+        return jsonify({"accepted":False,"reason":"invalid_scope"}), 400
+    existing = store[scope].get(cid,{})
+    if existing.get("version",0) > ver:
+        return jsonify({"accepted":False,"reason":"stale_version","current_version":existing["version"]}), 409
+    store[scope][cid] = {"version":ver,"payload":data.get("payload",{})}
+    return jsonify({"accepted":True,"ack_id":f"ack_{uuid.uuid4().hex[:8]}",
+                    "stored_at":datetime.now(timezone.utc).isoformat()}), 200
 
 
 # ── POST /v1/tick ─────────────────────────────────────────────────────────────
 @app.route("/v1/tick", methods=["POST"])
 def tick():
     data = request.get_json(force=True)
-    available_trigger_ids = data.get("available_triggers", [])
-    now_str = data.get("now", datetime.now(timezone.utc).isoformat())
-
+    trigger_ids = data.get("available_triggers",[])
     actions = []
-
-    ds = get_dataset()
-
-    for trigger_id in available_trigger_ids:
-        # Get trigger
-        trigger = store["trigger"].get(trigger_id, {}).get("payload") or \
-                  ds["triggers"].get(trigger_id)
-        if not trigger:
-            continue
-
-        # Suppression check
-        sup_key = trigger.get("suppression_key", trigger_id)
-        if sup_key in sent_suppression_keys:
-            continue
-
-        merchant_id = trigger.get("merchant_id") or trigger.get("payload", {}).get("merchant_id")
-        customer_id = trigger.get("customer_id") or trigger.get("payload", {}).get("customer_id")
-
-        if not merchant_id:
-            continue
-
+    for tid in trigger_ids:
+        trigger = store["trigger"].get(tid,{}).get("payload") or ds()["triggers"].get(tid)
+        if not trigger: continue
+        sup = trigger.get("suppression_key", tid)
+        if sup in sent_keys: continue
+        mid = trigger.get("merchant_id") or trigger.get("payload",{}).get("merchant_id")
+        cust_id = trigger.get("customer_id") or trigger.get("payload",{}).get("customer_id")
+        if not mid: continue
         try:
-            category, merchant, trigger_ctx, customer = resolve_context(merchant_id, trigger_id, customer_id)
-            result = compose(category, merchant, trigger_ctx, customer)
-
+            cat, mer, trg, cust = resolve(mid, tid, cust_id)
+            result = compose(cat, mer, trg, cust)
             conv_id = f"conv_{uuid.uuid4().hex[:8]}"
             conversations[conv_id] = {
-                "merchant_id": merchant_id,
-                "customer_id": customer_id,
-                "trigger_id": trigger_id,
-                "turns": [{"from": "vera", "body": result["body"]}],
-                "state": "open",
+                "merchant_id": mid, "customer_id": cust_id,
+                "trigger_id": tid, "state": "open",
+                "turns": [{"from":"vera","body":result["body"]}],
+                "auto_reply_count": 0,
             }
-
-            sent_suppression_keys.add(result.get("suppression_key", sup_key))
-
-            # Determine template name from trigger kind
-            kind = trigger_ctx.get("kind", "generic")
-            template_name = f"vera_{kind}_v1"
-            merchant_name = merchant.get("identity", {}).get("owner_first_name", "there")
-
+            sent_keys.add(result.get("suppression_key", sup))
+            kind = trg.get("kind","generic")
+            owner = _name(mer)
             actions.append({
                 "conversation_id": conv_id,
-                "merchant_id": merchant_id,
-                "customer_id": customer_id,
-                "send_as": result.get("send_as", "vera"),
-                "trigger_id": trigger_id,
-                "template_name": template_name,
-                "template_params": [merchant_name, kind],
-                "body": result.get("body", ""),
-                "cta": result.get("cta", "open_ended"),
-                "suppression_key": result.get("suppression_key", sup_key),
-                "rationale": result.get("rationale", ""),
+                "merchant_id": mid,
+                "customer_id": cust_id,
+                "send_as": result.get("send_as","vera"),
+                "trigger_id": tid,
+                "template_name": f"vera_{kind}_v2",
+                "template_params": [owner, kind],
+                "body": result["body"],
+                "cta": result.get("cta","open_ended"),
+                "suppression_key": result.get("suppression_key", sup),
+                "rationale": result.get("rationale",""),
             })
         except Exception as e:
-            app.logger.error(f"Compose failed for {trigger_id}: {e}")
-            continue
-
+            app.logger.error(f"tick compose error {tid}: {e}")
     return jsonify({"actions": actions}), 200
 
 
-# ── POST /v1/reply ────────────────────────────────────────────────────────────
+# ── POST /v1/reply ─────────────────────────────────────────────────────────────
 @app.route("/v1/reply", methods=["POST"])
 def reply():
     data = request.get_json(force=True)
-    conv_id = data.get("conversation_id")
-    merchant_id = data.get("merchant_id")
-    customer_id = data.get("customer_id")
-    from_role = data.get("from_role", "merchant")
-    message = data.get("message", "")
-    turn_number = data.get("turn_number", 2)
+    conv_id   = data.get("conversation_id","")
+    mid       = data.get("merchant_id","")
+    cust_id   = data.get("customer_id")
+    from_role = data.get("from_role","merchant")  # "merchant" or "customer"
+    message   = data.get("message","")
+    turn_num  = data.get("turn_number",2)
 
     conv = conversations.get(conv_id)
 
-    # Auto-reply detection: same message seen 2+ times = auto-reply
-    if conv:
-        prior_merchant_msgs = [t["body"] for t in conv["turns"] if t.get("from") == "merchant"]
-        if prior_merchant_msgs.count(message) >= 1 and len(message) > 20:
-            # Likely auto-reply — try once more then exit gracefully
-            if prior_merchant_msgs.count(message) >= 2:
-                conversations[conv_id]["state"] = "auto_reply_exit"
-                return jsonify({
-                    "action": "end",
-                    "rationale": "Detected WhatsApp Business auto-reply (3rd identical message). Gracefully exiting to avoid wasting turns.",
-                }), 200
+    # Already ended — don't keep responding
+    if conv and conv.get("state") == "ended":
+        return jsonify({"action":"end","rationale":"Conversation already ended."}), 200
 
-    # Intent detection — explicit "yes/go/do it/join" signals
-    positive_signals = ["yes", "ok", "sure", "go ahead", "let's do", "karo", "haan", "bilkul",
-                        "please proceed", "do it", "start", "shuru", "i want to join", "judrna hai"]
-    exit_signals = ["no", "nahi", "stop", "not interested", "baad mein", "later", "leave me",
-                    "not now", "cancel", "unsubscribe"]
+    prior_msgs = [t["body"] for t in (conv or {}).get("turns",[]) if t.get("from") == from_role]
 
-    msg_lower = message.lower()
+    # ── Customer-facing reply branch ──────────────────────────────────────────
+    if from_role == "customer":
+        it = intent(message)
 
-    is_positive = any(sig in msg_lower for sig in positive_signals)
-    is_exit = any(sig in msg_lower for sig in exit_signals)
+        # Slot pick / booking confirmation
+        if it == "slot_pick":
+            # Extract which slot they picked
+            msg_l = message.lower()
+            slot_label = ""
+            if "wed" in msg_l or "1" == msg_l.strip():
+                slot_label = "Wednesday"
+            elif "thu" in msg_l or "2" == msg_l.strip():
+                slot_label = "Thursday"
+            else:
+                slot_label = "your preferred time"
 
-    # Graceful exit
-    if is_exit or (conv and conv.get("state") == "auto_reply_exit"):
-        if conv:
-            conversations[conv_id]["state"] = "ended"
-        return jsonify({
-            "action": "end",
-            "rationale": "Merchant signaled not interested or stop. Gracefully exiting per conversation design.",
-        }), 200
+            # Get merchant name from context
+            _, mer, trg, _ = resolve(mid or (conv or {}).get("merchant_id",""),
+                                     (conv or {}).get("trigger_id",""), cust_id)
+            mer_name = mer.get("identity",{}).get("name","the clinic") if mer else "the clinic"
+            offers = _active_offers(mer) if mer else []
+            price_note = offers[0] if offers else ""
 
-    # Build follow-up context
-    if conv:
-        trigger_id = conv.get("trigger_id", "")
-        conv["turns"].append({"from": from_role, "body": message})
-    else:
-        # New conversation started by merchant
-        trigger_id = ""
-        conversations[conv_id] = {
-            "merchant_id": merchant_id, "customer_id": customer_id,
-            "trigger_id": "", "turns": [{"from": from_role, "body": message}], "state": "open",
-        }
+            body = (f"Confirmed! {mer_name} has you booked for {slot_label}. "
+                    f"{'Your ' + price_note + ' is all set. ' if price_note else ''}"
+                    f"We'll send a reminder an hour before. See you there! 🦷")
+            if conv:
+                conversations[conv_id]["turns"].append({"from":"vera","body":body})
+            return jsonify({"action":"send","body":body,"cta":"none",
+                           "rationale":"Customer confirmed slot pick; warm booking confirmation; no further CTA needed."}), 200
 
-    ds = get_dataset()
-    try:
-        category, merchant, trigger_ctx, customer = resolve_context(
-            merchant_id or (conv or {}).get("merchant_id", ""),
-            trigger_id,
-            customer_id or (conv or {}).get("customer_id"),
-        )
+        if it == "exit":
+            if conv: conversations[conv_id]["state"] = "ended"
+            return jsonify({"action":"send",
+                           "body":"No worries at all! Feel free to reach out whenever you're ready. We're here 😊",
+                           "cta":"none",
+                           "rationale":"Customer exit; warm close; door left open."}), 200
 
-        # Build a mini follow-up prompt
-        history_text = ""
-        if conv:
-            for turn in conv["turns"][-4:]:
-                history_text += f"[{turn.get('from','?').upper()}]: {turn.get('body','')}\n"
+        if it == "positive":
+            body = "Perfect! I'll confirm the details with the clinic and send you a reminder. Is there anything specific you'd like us to note for your visit?"
+            if conv: conversations[conv_id]["turns"].append({"from":"vera","body":body})
+            return jsonify({"action":"send","body":body,"cta":"open_ended",
+                           "rationale":"Customer positive; confirm and ask for preferences."}), 200
 
-        action_hint = ""
-        if is_positive:
-            action_hint = "The merchant said YES/agreed. Now EXECUTE the promised action — don't re-pitch, just do it and confirm. Use effort externalization."
+        # Default customer reply
+        body = "Thanks for reaching out! Let me check the available options and get back to you in a moment."
+        if conv: conversations[conv_id]["turns"].append({"from":"vera","body":body})
+        return jsonify({"action":"send","body":body,"cta":"open_ended",
+                       "rationale":"Customer message; acknowledging and following up."}), 200
+
+    # ── Merchant-facing reply branch ──────────────────────────────────────────
+
+    # Auto-reply detection — end IMMEDIATELY after first auto-reply (not second)
+    if is_auto_reply(message, prior_msgs):
+        arc = (conv or {}).get("auto_reply_count", 0)
+        if arc == 0:
+            # First auto-reply — try once to break through
+            if conv: conv["auto_reply_count"] = 1
+            if conv: conv["turns"].append({"from":"merchant","body":message,"tag":"auto_reply"})
+            _, mer, _, _ = resolve(mid or (conv or {}).get("merchant_id",""),
+                                   (conv or {}).get("trigger_id",""))
+            hi = _hi(mer.get("identity",{}).get("languages",["en"])) if mer else False
+            if hi:
+                body = "Samajh gayi — team tak pahuch gayi hogi. Kya aap khud 2 minute de sakte hain? Jo share karna tha woh 5-min ka useful kaam hai."
+            else:
+                body = "Got it — your team will see this. Can you spare 2 minutes directly? What I wanted to share is a 5-minute useful action."
+            if conv: conv["turns"].append({"from":"vera","body":body})
+            return jsonify({"action":"send","body":body,"cta":"binary_yes_stop",
+                           "rationale":"First auto-reply — one polite attempt to reach the owner before exiting."}), 200
         else:
-            action_hint = f"The merchant replied: '{message}'. Respond helpfully, move conversation forward. If they asked a question, answer it specifically. Don't re-introduce yourself."
+            # Second auto-reply — exit gracefully
+            if conv: conversations[conv_id]["state"] = "ended"
+            return jsonify({"action":"end",
+                           "rationale":"Second consecutive auto-reply. Gracefully exiting — will retry via different touchpoint."}), 200
 
-        follow_up_prompt = f"""FOLLOW-UP CONVERSATION TURN {turn_number}
+    if conv: conv.setdefault("auto_reply_count",0)
 
-MERCHANT: {merchant.get("identity", {}).get("name", "")}
-CATEGORY: {merchant.get("category_slug", "")}
+    # Log turn
+    if conv: conv["turns"].append({"from":"merchant","body":message})
 
-CONVERSATION HISTORY:
-{history_text}
+    it = intent(message)
+    _, mer, trg, _ = resolve(mid or (conv or {}).get("merchant_id",""),
+                             (conv or {}).get("trigger_id",""))
+    hi = _hi(mer.get("identity",{}).get("languages",["en"])) if mer else False
+    offers = _active_offers(mer) if mer else []
+    mer_name = _name(mer) if mer else ""
 
-LATEST MERCHANT MESSAGE: "{message}"
+    if it == "exit":
+        if conv: conversations[conv_id]["state"] = "ended"
+        if hi:
+            body = "Bilkul samajh gaya! Koi baat nahi — jab chahein wapas aa jayein. Best of luck! 🙂"
+        else:
+            body = "Understood — no problem at all. Feel free to reach out whenever you need. Best wishes!"
+        if conv: conv["turns"].append({"from":"vera","body":body})
+        return jsonify({"action":"send","body":body,"cta":"none",
+                       "rationale":"Merchant exit; warm non-pushy farewell; door left open."}), 200
 
-INSTRUCTION: {action_hint}
+    if it == "positive":
+        # Execute the action — don't re-pitch
+        if hi:
+            body = f"Shukriya {mer_name}! Main abhi kaam shuru kar deti hoon — 10-15 minute mein draft ready hoga. Ek nazar dekh lena, phir main ise live kar dungi."
+        else:
+            body = f"On it, {mer_name}! I'll have the draft ready in 10-15 minutes. Quick review from your side and I'll push it live."
+        if conv: conv["turns"].append({"from":"vera","body":body})
+        return jsonify({"action":"send","body":body,"cta":"none",
+                       "rationale":"Merchant accepted; execute immediately; no re-pitch."}), 200
 
-Return JSON: {{"action": "send", "body": "<reply>", "cta": "open_ended"|"binary_yes_stop"|"none", "rationale": "<1 sentence>"}}
-OR: {{"action": "end", "rationale": "<reason>"}}
-OR: {{"action": "wait", "wait_seconds": 1800, "rationale": "<reason>"}}
+    if it == "question":
+        # Build a category-aware answer anchor
+        cat_slug = mer.get("category_slug","") if mer else ""
+        answers = {
+            "dentists": f"Good question. For dental practices, the usual answer depends on your case mix — let me check your specific profile and come back in 5 minutes with an exact answer.",
+            "salons": f"Great point. For salons in your locality, I'll pull the specific data and come back in 5 minutes.",
+            "restaurants": f"Makes sense to ask. I'll check your delivery vs dine-in split and come back with specifics.",
+            "gyms": f"Good question. I'll pull your member retention data and come back with a specific answer.",
+            "pharmacies": f"Fair question. I'll check the category data and come back with specifics in 5 minutes.",
+        }
+        body = answers.get(cat_slug, f"Good question, {mer_name}. Let me check that specific detail and come back with an accurate answer in 5 minutes.")
+        if conv: conv["turns"].append({"from":"vera","body":body})
+        return jsonify({"action":"send","body":body,"cta":"open_ended",
+                       "rationale":"Merchant question; acknowledge and commit to specific answer; don't guess."}), 200
 
-Return ONLY valid JSON."""
+    # Neutral — keep conversation alive with next best step
+    if hi:
+        body = f"Samjha {mer_name}. Aur kuch discuss karna hai, ya is topic pe aage badhein?"
+    else:
+        body = f"Got it, {mer_name}. Anything else on your mind, or shall we move forward on this?"
+    if conv: conv["turns"].append({"from":"vera","body":body})
+    return jsonify({"action":"send","body":body,"cta":"open_ended",
+                   "rationale":"Neutral merchant reply; light continuation to keep conversation open."}), 200
 
-        import requests as req
-        from bot import SYSTEM_PROMPT, OPENROUTER_API_KEY, OPENROUTER_URL, MODEL
-        resp = req.post(OPENROUTER_URL, json={
-            "model": MODEL,
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT},
-                         {"role": "user", "content": follow_up_prompt}],
-            "temperature": 0, "max_tokens": 500,
-        }, headers={
-            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            "Content-Type": "application/json",
-        }, timeout=30)
 
-        import re
-        raw = resp.json()["choices"][0]["message"]["content"]
-        clean = re.sub(r"```(?:json)?", "", raw).strip().rstrip("`").strip()
-        result = json.loads(clean)
-
-        if result.get("action") == "send":
-            if conv:
-                conversations[conv_id]["turns"].append({"from": "vera", "body": result.get("body", "")})
-        elif result.get("action") == "end":
-            if conv:
-                conversations[conv_id]["state"] = "ended"
-
-        return jsonify(result), 200
-
-    except Exception as e:
-        app.logger.error(f"Reply compose failed: {e}")
-        fallback_body = "Samjha! Main iska kaam kar deti hoon aur aapko update karti hoon." \
-            if is_positive else "Thanks for your message. Is there anything specific I can help you with today?"
-        return jsonify({
-            "action": "send",
-            "body": fallback_body,
-            "cta": "open_ended",
-            "rationale": f"Fallback response due to compose error: {e}",
-        }), 200
-
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({
-        "status": "vera-live",
-        "message": "Magicpin Vera Bot is running",
-        "healthz": "/v1/healthz",
-        "metadata": "/v1/metadata"
-    }), 200
-  
 # ── GET /v1/healthz ───────────────────────────────────────────────────────────
-_start_time = time.time()
-
 @app.route("/v1/healthz", methods=["GET"])
 def healthz():
+    d = ds()
     return jsonify({
         "status": "ok",
-        "uptime_seconds": int(time.time() - _start_time),
+        "uptime_seconds": int(time.time()-_start),
         "contexts_loaded": {
-            "category": len(store["category"]) + len(get_dataset()["categories"]),
-            "merchant": len(store["merchant"]) + len(get_dataset()["merchants"]),
-            "customer": len(store["customer"]) + len(get_dataset()["customers"]),
-            "trigger": len(store["trigger"]) + len(get_dataset()["triggers"]),
+            "category": len(store["category"]) + len(d["categories"]),
+            "merchant": len(store["merchant"]) + len(d["merchants"]),
+            "customer": len(store["customer"]) + len(d["customers"]),
+            "trigger":  len(store["trigger"])  + len(d["triggers"]),
         },
-        "active_conversations": len(conversations),
-        "suppressed_keys": len(sent_suppression_keys),
+        "active_conversations": len([c for c in conversations.values() if c.get("state")!="ended"]),
+        "suppressed_keys": len(sent_keys),
     }), 200
 
 
@@ -336,19 +300,18 @@ def healthz():
 @app.route("/v1/metadata", methods=["GET"])
 def metadata():
     return jsonify({
-        "team_name": "jayesh bhojawat",
-        "team_members": ["jayesh bhojawat"],
-        "model": "meta-llama/llama-3.3-70b-instruct:free via OpenRouter",
-        "approach": "Trigger-kind routing (24 variants) → structured 4-context prompt → LLM compose → schema validation with retry. Auto-reply detection. Intent routing (positive/exit). Suppression dedup.",
+        "team_name": "Jayesh Bhojawat",
+        "team_members": ["Jayesh Bhojawat"],
+        "model": "template-first + optional LLM refinement (OpenRouter Llama 3.3 70B)",
+        "approach": "24 trigger-kind templates with real context data (no API key required). Optional LLM refinement for naturalness. Auto-reply detection. Merchant/customer from_role branching. Slot-booking confirmation handler. Suppression dedup.",
         "contact_email": "jayeshbhojawat@gmail.com",
-        "version": "1.0.0",
-        "submitted_at": "2026-04-29T00:00:00Z",
+        "version": "2.0.0",
+        "submitted_at": "2026-04-30T00:00:00Z",
     }), 200
 
 
 if __name__ == "__main__":
     import os
-    port = int(os.getenv("PORT", 8080))
-    print(f"Vera server starting on port {port}...")
-    print(f"LLM: {MODEL}")
+    port = int(os.getenv("PORT",8080))
+    print(f"Vera v2 starting on port {port}...")
     app.run(host="0.0.0.0", port=port, debug=False)
