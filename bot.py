@@ -1,6 +1,6 @@
 """
 bot.py — Vera Message Composer
-magicpin AI Challenge — Mohamed Riyaas R
+magicpin AI Challenge - Jayesh Bhojawat
 """
 
 import os, json, re
