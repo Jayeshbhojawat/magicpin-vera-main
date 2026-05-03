@@ -279,6 +279,14 @@ def reply():
 
 
 # ── GET /v1/healthz ───────────────────────────────────────────────────────────
+@app.route("/", methods=["GET"])
+def home():
+    return {
+        "status": "running",
+        "message": "Vera bot is live 🚀",
+        "health": "/v1/healthz"
+    }
+
 @app.route("/v1/healthz", methods=["GET"])
 def healthz():
     d = ds()
