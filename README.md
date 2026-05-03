@@ -1,8 +1,5 @@
 # Vera Message Composer — magicpin AI Challenge
 
-**Candidate:** Mohamed Riyaas R  
-**Email:** mdriyaas68@gmail.com  
-**Track:** AI Engineering
 
 ---
 
@@ -112,4 +109,4 @@ The challenge says free tools score the same as paid. Llama 3.3 70B at temperatu
 ## Live Bot URL
 
 ```bash
-https://magicpin-vera-qbve.onrender.com
+https://web-production-97d4b.up.railway.app
