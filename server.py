@@ -1,6 +1,6 @@
 """
 server.py — Vera HTTP Server
-magicpin AI Challenge — Mohamed Riyaas R
+magicpin AI Challenge — jayesh bhojawat
 
 Exposes the 5 endpoints required by the judge harness:
   POST /v1/context   — receive context push
@@ -336,11 +336,11 @@ def healthz():
 @app.route("/v1/metadata", methods=["GET"])
 def metadata():
     return jsonify({
-        "team_name": "Mohamed Riyaas R",
-        "team_members": ["Mohamed Riyaas R"],
+        "team_name": "jayesh bhojawat",
+        "team_members": ["jayesh bhojawat"],
         "model": "meta-llama/llama-3.3-70b-instruct:free via OpenRouter",
         "approach": "Trigger-kind routing (24 variants) → structured 4-context prompt → LLM compose → schema validation with retry. Auto-reply detection. Intent routing (positive/exit). Suppression dedup.",
-        "contact_email": "mdriyaas68@gmail.com",
+        "contact_email": "jayeshbhojawat@gmail.com",
         "version": "1.0.0",
         "submitted_at": "2026-04-29T00:00:00Z",
     }), 200
