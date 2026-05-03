@@ -1,6 +1,6 @@
 """
 conversation_handlers.py — Multi-Turn Conversation Handling
-magicpin AI Challenge — Mohamed Riyaas R
+magicpin AI Challenge — Jayesh Bhojawat
 
 Demonstrates:
   1. Auto-reply detection (same message 2+ times = WA Business auto-reply)
