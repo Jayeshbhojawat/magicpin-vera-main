@@ -1,10 +1,10 @@
-# 🌟 vera — the whatsapp bot that actually gets it
+# 🌟 vera the whatsapp bot that actually gets it
 
 **by Jayesh Bhojawat** · [jayeshbhojawat@gmail.com](mailto:jayeshbhojawat@gmail.com) · magicpin AI Challenge
 
 ![vera banner](./banner.svg)
 
-> *"what if your AI assistant didn't just send messages — but sent the right message, at the right moment, in the right language, with the right vibe?"*
+> *"what if your AI assistant didn't just send messages but sent the right message, at the right moment, in the right language, with the right vibe?"*
 >
 > that's vera. and this is her story. 💌
 
@@ -14,15 +14,15 @@
 
 vera isn't just a bot. she's a thoughtful little composer who:
 
-🎯 **knows 24 different moods** — from "a dentist needs a clinical nudge" to "a salon needs festival energy" — each trigger gets its own personality
+🎯 **knows 24 different moods** from "a dentist needs a clinical nudge" to "a salon needs festival energy" each trigger gets its own personality
 
-🏗️ **runs a full HTTP server** — all 5 judge endpoints, clean and ready (`/context`, `/tick`, `/reply`, `/healthz`, `/metadata`)
+🏗️ **runs a full HTTP server** all 5 judge endpoints, clean and ready (`/context`, `/tick`, `/reply`, `/healthz`, `/metadata`)
 
-💬 **handles real conversations** — detects auto replies, understands YES vs STOP, switches Hindi/English mid chat like a desi friend
+💬 **handles real conversations** detects auto replies, understands YES vs STOP, switches Hindi/English mid chat like a desi friend
 
-🛡️ **validates herself** — checks her own output, retries if something's off. accountability era ✅
+🛡️ **validates herself** checks her own output, retries if something's off. accountability era ✅
 
-📦 **ships with 25 pre generated messages** — anchored on real numbers, real data, real feels
+📦 **ships with 25 pre generated messages** anchored on real numbers, real data, real feels
 
 ---
 
@@ -66,7 +66,7 @@ she checks her work       (validates CTA, send_as, body, retries if needed)
 one prompt = average everything. routing = sharp, specific, *actually good*. a dentist message that says "38% fewer caries from a 2,100 patient JIDA trial" hits different than "great dental tips!" you feel me.
 
 **why Llama 3.3 70B free tier?**
-free tools, same score — challenge rules. llama handles Hindi English code mix beautifully. only gap: subtle Hindi idioms are slightly formal sometimes. would upgrade to Claude Sonnet for pure poetry 🫶
+free tools, same score, challenge rules. llama handles Hindi English code mix beautifully. only gap: subtle Hindi idioms are slightly formal sometimes. would upgrade to Claude Sonnet for pure poetry 🫶
 
 **things i skipped (for now)**
 routing gets 90% of the value of semantic search anyway. suppression logic covers the conversation cadence planner for now. payload slots work fine for seed data.
@@ -75,9 +75,9 @@ routing gets 90% of the value of semantic search anyway. suppression logic cover
 
 ## 💡 what would make vera even better
 
-1. **50+ turn conversation history per merchant** — she'd know your favorite topics, your reply speed, everything
-2. **locality level peer data** — "Lajpat Nagar dentists" hits harder than "Delhi dentists"
-3. **WhatsApp template approval status** — knowing what's pre approved changes the whole opening strategy
+1. **50+ turn conversation history per merchant** she'd know your favorite topics, your reply speed, everything
+2. **locality level peer data** "Lajpat Nagar dentists" hits harder than "Delhi dentists"
+3. **WhatsApp template approval status** knowing what's pre approved changes the whole opening strategy
 
 ---
 
@@ -85,9 +85,9 @@ routing gets 90% of the value of semantic search anyway. suppression logic cover
 
 | file | what it does |
 |---|---|
-| `bot.py` | the heart — `compose(category, merchant, trigger, customer?)` |
-| `server.py` | the face — all 5 Flask endpoints, judge ready |
-| `conversation_handlers.py` | the brain — multi turn, auto reply, intent, language |
+| `bot.py` | the heart `compose(category, merchant, trigger, customer?)` |
+| `server.py` | the face, all 5 Flask endpoints, judge ready |
+| `conversation_handlers.py` | the brain, multi turn, auto reply, intent, language |
 | `submission.jsonl` | 25 pre loved outputs, hand tuned |
 | `dataset/` | the world vera lives in |
 | `requirements.txt` | just flask + requests, lightweight baby |
@@ -100,7 +100,7 @@ routing gets 90% of the value of semantic search anyway. suppression logic cover
 https://web-production-97d4b.up.railway.app
 ```
 
-say hi at `/v1/healthz` — she'll tell you she's okay 🩵
+say hi at `/v1/healthz` she'll tell you she's okay 🩵
 
 ---
 
