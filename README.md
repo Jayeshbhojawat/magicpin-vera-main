@@ -2,7 +2,7 @@
 
 **by Jayesh Bhojawat** · [jayeshbhojawat@gmail.com](mailto:jayeshbhojawat@gmail.com) · magicpin AI Challenge
 
-![vera banner](https://raw.githubusercontent.com/Jayeshbhojawat/magicpin-vera/main/banner.svg)
+![vera banner](./banner.svg)
 
 > *"what if your AI assistant didn't just send messages — but sent the right message, at the right moment, in the right language, with the right vibe?"*
 >
