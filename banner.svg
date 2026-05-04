@@ -1,28 +1,13 @@
-<svg width="100%" viewBox="0 0 680 320" role="img" xmlns="http://www.w3.org/2000/svg">
-  <style>
-    .bg { fill: #0d1f2d; }
-    .bubble1 { fill: #25d366; }
-    .bubble2 { fill: #1a3a4a; }
-    .star { fill: #f6c90e; }
-    .accent { fill: #ff6b6b; }
-    .glow { fill: #4ecdc4; }
-    .soft { fill: #ffe66d; }
-    .wt { fill: #ffffff; font-family: Arial, sans-serif; font-size: 13px; font-weight: 500; }
-    .gt { fill: #25d366; font-family: Arial, sans-serif; font-size: 11px; }
-    .dt { fill: #b0c4cc; font-family: Arial, sans-serif; font-size: 10px; }
-    .big { fill: #ffffff; font-family: Arial, sans-serif; font-size: 28px; font-weight: 500; }
-    .sub { fill: #4ecdc4; font-family: Arial, sans-serif; font-size: 13px; }
-    .hint { fill: #8ab4bf; font-family: Arial, sans-serif; font-size: 11px; }
-  </style>
-  <rect class="bg" width="680" height="320" rx="16"/>
-  <circle class="star" cx="60" cy="40" r="3"/>
-  <circle class="star" cx="620" cy="55" r="2"/>
-  <circle class="star" cx="340" cy="20" r="2.5"/>
-  <circle class="star" cx="500" cy="30" r="2"/>
-  <circle class="star" cx="130" cy="70" r="1.5"/>
-  <circle class="glow" cx="80" cy="200" r="2"/>
-  <circle class="accent" cx="630" cy="180" r="2.5"/>
-  <circle class="soft" cx="300" cy="295" r="2"/>
+<svg width="100%" viewBox="0 0 680 320" xmlns="http://www.w3.org/2000/svg">
+  <rect width="680" height="320" rx="16" fill="#0d1f2d"/>
+  <circle cx="60" cy="40" r="3" fill="#f6c90e"/>
+  <circle cx="620" cy="55" r="2" fill="#f6c90e"/>
+  <circle cx="340" cy="20" r="2.5" fill="#f6c90e"/>
+  <circle cx="500" cy="30" r="2" fill="#f6c90e"/>
+  <circle cx="130" cy="70" r="1.5" fill="#f6c90e"/>
+  <circle cx="80" cy="200" r="2" fill="#4ecdc4"/>
+  <circle cx="630" cy="180" r="2.5" fill="#ff6b6b"/>
+  <circle cx="300" cy="295" r="2" fill="#ffe66d"/>
   <circle cx="100" cy="155" r="52" fill="#1a3a4a"/>
   <circle cx="100" cy="155" r="48" fill="#0f2a38"/>
   <circle cx="100" cy="148" r="22" fill="#4ecdc4"/>
@@ -34,19 +19,19 @@
   <line x1="100" y1="126" x2="100" y2="112" stroke="#f6c90e" stroke-width="2"/>
   <circle cx="100" cy="109" r="4" fill="#f6c90e"/>
   <rect x="82" y="170" width="36" height="20" rx="8" fill="#4ecdc4"/>
-  <rect x="175" y="48" width="340" height="52" rx="14" class="bubble1"/>
-  <text x="193" y="72" class="wt">Dr. Meera, JIDA trial — 38% fewer caries.</text>
-  <text x="193" y="90" class="wt">Want me to draft the patient note?</text>
-  <rect x="175" y="116" width="180" height="36" rx="14" class="bubble2"/>
-  <text x="193" y="138" class="wt">Yes please!</text>
-  <rect x="175" y="168" width="360" height="52" rx="14" class="bubble1"/>
-  <text x="193" y="192" class="wt">On it! Draft ready in 10 mins — take a look</text>
-  <text x="193" y="210" class="wt">and I'll push it live once you confirm.</text>
-  <rect x="175" y="236" width="290" height="36" rx="14" class="bubble1"/>
-  <text x="193" y="258" class="wt">Shukriya! Main abhi shuru karti hoon.</text>
-  <text x="54" y="230" text-anchor="middle" class="big">vera</text>
-  <text x="54" y="252" text-anchor="middle" class="sub">by jayesh</text>
-  <text x="54" y="270" text-anchor="middle" class="hint">magicpin ai</text>
+  <rect x="175" y="48" width="340" height="52" rx="14" fill="#25d366"/>
+  <text x="193" y="72" fill="white" font-family="Arial,sans-serif" font-size="13" font-weight="500">Dr. Meera, JIDA trial — 38% fewer caries.</text>
+  <text x="193" y="90" fill="white" font-family="Arial,sans-serif" font-size="13" font-weight="500">Want me to draft the patient note?</text>
+  <rect x="175" y="116" width="180" height="36" rx="14" fill="#1a3a4a"/>
+  <text x="193" y="138" fill="white" font-family="Arial,sans-serif" font-size="13" font-weight="500">Yes please!</text>
+  <rect x="175" y="168" width="360" height="52" rx="14" fill="#25d366"/>
+  <text x="193" y="192" fill="white" font-family="Arial,sans-serif" font-size="13" font-weight="500">On it! Draft ready in 10 mins — take a look</text>
+  <text x="193" y="210" fill="white" font-family="Arial,sans-serif" font-size="13" font-weight="500">and I'll push it live once you confirm.</text>
+  <rect x="175" y="236" width="290" height="36" rx="14" fill="#25d366"/>
+  <text x="193" y="258" fill="white" font-family="Arial,sans-serif" font-size="13" font-weight="500">Shukriya! Main abhi shuru karti hoon.</text>
+  <text x="54" y="230" text-anchor="middle" fill="white" font-family="Arial,sans-serif" font-size="28" font-weight="500">vera</text>
+  <text x="54" y="252" text-anchor="middle" fill="#4ecdc4" font-family="Arial,sans-serif" font-size="13">by jayesh</text>
+  <text x="54" y="270" text-anchor="middle" fill="#8ab4bf" font-family="Arial,sans-serif" font-size="11">magicpin ai</text>
   <circle cx="176" cy="298" r="4" fill="#25d366" opacity="0.7"/>
   <circle cx="192" cy="298" r="4" fill="#4ecdc4" opacity="0.7"/>
   <circle cx="208" cy="298" r="4" fill="#f6c90e" opacity="0.7"/>
